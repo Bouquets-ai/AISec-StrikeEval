@@ -9,6 +9,8 @@
 # 注意
 适用范围仅为端侧模型，调用本地的ollama进行测试，可能有量化的问题和满血模型有出入，请仔细查看
 
+这些试题更加关注的是准确度和广度而非强逻辑性
+
 # References
 
 Zhang, Q. (2023). 大语言模型测评 [PowerPoint slides]. http://www.qizhang.info/slides/llmeval.pdf
