@@ -27,16 +27,16 @@ AISec-StrikeEval evaluates LLMs on cybersecurity and pentest question sets. It s
 
 ### Entry
 ```bash
-python AISec-StrikeEval.py [参数]
+python AISec-StrikeEval.py [args]
 ```
 
 ### Key Arguments (simplified)
 
 | Arg | Description | Default |
 |------|------|--------|
-| `--model` | 模型名称（需与服务加载一致） | `llama3` |
+| `--model` | Model name (must match deployed) | `llama3` |
 | `--api-type` | API type: `ollama` / `vllm` / `deepseek` | `ollama` |
-| `--base-url` | API 服务地址 | 见上文默认值 |
+| `--base-url` | API base URL | varies |
 | `--api-key` | API key (DeepSeek required, vLLM optional) | None |
 | `--threads` | Concurrency | `4` |
 | `--temperature` | Sampling temperature | `0.2` |
@@ -50,18 +50,18 @@ python AISec-StrikeEval.py --api-type vllm --base-url http://127.0.0.1:8001 --ap
 ```
 
 ### Outputs
-- 概览报告：
+- Summary reports:
   - `report_StrikeEval_YYYYMMDD_HHMMSS.html`
   - `report_cissp_YYYYMMDD_HHMMSS.html`
-- `cs-eval.json` 答案：
+- `cs-eval.json` answers:
   - `answers_cs_eval_YYYYMMDD_HHMMSS.json`
 
 `cs-eval.json` answer format example:
 ```json
 [
   { "question_id": "1",    "answer": "A" },
-  { "question_id": "123",  "answer": "对" },
-  { "question_id": "1234", "answer": "是否涉及漏洞：是\n漏洞号：CVE-2024-22891\n影响的产品及版本：Nteract v.0.28.0" }
+  { "question_id": "123",  "answer": "True" },
+  { "question_id": "1234", "answer": "Vulnerability involved: Yes\nCVE: CVE-2024-22891\nAffected products and versions: Nteract v0.28.0" }
 ]
 ```
 
@@ -77,10 +77,6 @@ python AISec-StrikeEval.py --api-type vllm --base-url http://127.0.0.1:8001 --ap
 
 ## Output Description
 
-- 终端：实时进度、答题结果、最终统计、用时
-- HTML 报告：默认生成概览报告（准确率、答对/总数、错误数），不显示逐题详细表
-- JSON 答案：自动为 `cs-eval.json` 输出模型答案（格式如上），逐题包含 `question_id` 与答案文本
-
 Terminal: real-time progress, results, final statistics, elapsed time
 HTML: summary report (accuracy, correct/total, errors), no per-question table
 JSON: model answers for `cs-eval.json` as shown above
@@ -93,13 +89,6 @@ JSON: model answers for `cs-eval.json` as shown above
 - Important: `cissp` and `StrikeEval` include ground-truth answers and are suitable for workflow demonstration and tool validation only; not for rigorous benchmarking. For formal evaluation/submission, use `cs-eval`.
 
 ## Notes
-
-- DeepSeek requires `--api-key`
-- vLLM model name must match the deployed model (e.g., `Qwen2.5-7B-Instruct`)
-- Ensure `--base-url` is reachable
-- Use `--threads` and `--limit` for large datasets
-
-## Notes (English)
 
 - DeepSeek requires `--api-key`
 - vLLM model name must match the deployed model (e.g., `Qwen2.5-7B-Instruct`)
