@@ -74,10 +74,11 @@ def load_questions_freeform(path):
 
 
 def build_prompt(q):
-    # Chinese instruction with English fallback to constrain output
     instruction = (
-        "请从以下选项中选择一个最合适的答案，且只输出一个字母（A/B/C/D），不要解释。\n"
-        "Answer ONLY one letter (A/B/C/D) without explanation.\n"
+        "请直接给出答案，不要解释。\n"
+        "若为选择题（出现A-D选项或题干含‘单选题/多选题’），仅输出字母；\n"
+        "若为判断题，仅输出‘对’或‘错’；\n"
+        "最后一行使用 ‘Final Answer: <答案>’ 标注最终答案。\n"
     )
     options = q.get('options', {})
     opt_lines = [
@@ -90,14 +91,15 @@ def build_prompt(q):
     return prompt
 
 def build_prompt_freeform(q):
-    instruction = (
+    instruction_selective = (
         "请直接给出答案，不要解释。\n"
-        "若为选择题（出现A-D选项或题干含‘单选题/多选题’），仅输出字母；\n"
+        "若为选择题（出现A-D选项或题干含‘单选题/多选题’），仅输出字母；若为多选题，输出所有符合的选项字母，并用逗号分隔（例如 A,B,D）；\n"
         "若为判断题，仅输出‘对’或‘错’；\n"
-        "若为漏洞问题，按三行格式：\n"
-        "是否涉及漏洞：是或否\n"
-        "漏洞号：如CVE-XXXX或无\n"
-        "影响的产品及版本：文本或无\n"
+        "最后一行使用 ‘Final Answer: <答案>’ 标注最终答案。\n"
+    )
+    instruction_generic = (
+        "请直接给出答案，不要解释。\n"
+        "若为判断题，仅输出‘对’或‘错’；\n"
         "其它题型请输出简洁文本答案。\n"
         "最后一行使用 ‘Final Answer: <答案>’ 标注最终答案。\n"
     )
@@ -111,13 +113,80 @@ def build_prompt_freeform(q):
             f"D. {options.get('D', '')}",
         ]
     opt_block = ("\n选项：\n" + "\n".join(opt_lines)) if opt_lines else ""
-    prompt = f"{instruction}\n题目：{q.get('question','')}" + opt_block + "\n你的答案："
+    qtext = q.get('question') or q.get('prompt') or ''
+    lt = str(qtext).lower()
+    detected = None
+    if ("多选题" in str(qtext)) or ("multiple-choice" in lt) or ("multiple choice" in lt):
+        detected = "多选题"
+    elif ("单选题" in str(qtext)) or ("single-choice" in lt) or ("single choice" in lt):
+        detected = "单选题"
+    elif ("判断题" in str(qtext)) or ("true/false" in lt) or ("true or false" in lt) or ("判断" in str(qtext)):
+        detected = "判断题"
+    elif options:
+        detected = "单选题"
+    type_line = f"当前题型：{detected}\n" if detected else ""
+    use_selective = bool(detected in ("单选题","多选题")) or bool(options)
+    instruction = instruction_selective if use_selective else instruction_generic
+    prompt = f"{instruction}\n{type_line}题目：{q.get('question','')}" + opt_block + "\n你的答案："
+    return prompt
+
+def build_prompt_freeform_strict(q):
+    options = q.get('options', {})
+    opt_lines = []
+    if options:
+        opt_lines = [
+            f"A. {options.get('A', '')}",
+            f"B. {options.get('B', '')}",
+            f"C. {options.get('C', '')}",
+            f"D. {options.get('D', '')}",
+        ]
+    opt_block = ("\n选项：\n" + "\n".join(opt_lines)) if opt_lines else ""
+    qtext = q.get('question') or q.get('prompt') or ''
+    lt = str(qtext).lower()
+    detected = None
+    if ("多选题" in str(qtext)) or ("multiple-choice" in lt) or ("multiple choice" in lt):
+        detected = "多选题"
+    elif ("单选题" in str(qtext)) or ("single-choice" in lt) or ("single choice" in lt):
+        detected = "单选题"
+    elif ("判断题" in str(qtext)) or ("true/false" in lt) or ("true or false" in lt) or ("判断" in str(qtext)):
+        detected = "判断题"
+    elif options:
+        detected = "单选题"
+    type_line = f"当前题型：{detected}\n" if detected else ""
+    instruction = (
+        "请直接给出答案，不要解释。\n"
+        "若为选择题，仅输出字母；若为多选，输出A,B,C；\n"
+        "若为判断题，仅输出‘对’或‘错’；\n"
+        "仅输出一行答案。\n"
+    )
+    prompt = f"{instruction}\n{type_line}题目：{qtext}" + opt_block + "\n你的答案："
+    return prompt
+
+def build_prompt_freeform_stricter(q):
+    options = q.get('options', {})
+    opt_lines = []
+    if options:
+        opt_lines = [
+            f"A. {options.get('A', '')}",
+            f"B. {options.get('B', '')}",
+            f"C. {options.get('C', '')}",
+            f"D. {options.get('D', '')}",
+        ]
+    opt_block = ("\n选项：\n" + "\n".join(opt_lines)) if opt_lines else ""
+    qtext = q.get('question') or q.get('prompt') or ''
+    instruction = (
+        "请直接给出答案，不要解释。\n"
+        "仅输出一行中文短语作为答案。\n"
+        "不得输出单个字母A/B/C/D。\n"
+    )
+    prompt = f"{instruction}\n题目：{qtext}" + opt_block + "\n你的答案："
     return prompt
 
 def extract_text_answer(text, q=None):
     if not text:
         return ""
     s = str(text).strip()
+    s = re.sub(r"(?is)<think[\s\S]*?</think>", "", s)
     s = s.strip('`').strip('"')
     s = re.sub(r"^```[\s\S]*?```", lambda m: m.group(0).strip('`'), s)
     def try_json_payload(x):
@@ -137,47 +206,145 @@ def extract_text_answer(text, q=None):
         if j:
             s = j
     t = (q.get('prompt') or q.get('question') or '').lower() if isinstance(q, dict) else ''
-    if ('判断题' in t) or ('true/false' in t) or ('判断' in t):
-        if re.search(r"\b(true|正确|是)\b", s, flags=re.IGNORECASE):
+    allow_letters = False
+    if isinstance(q, dict):
+        opts = q.get('options') or {}
+        if opts:
+            allow_letters = True
+        if ('单选题' in t) or ('多选题' in t) or ('single-choice' in t) or ('single choice' in t) or ('multiple-choice' in t) or ('multiple choice' in t) or ('单选' in t) or ('多选' in t):
+            allow_letters = True
+    is_judgement = ('判断题' in t) or ('true/false' in t) or ('true or false' in t) or ('判断' in t)
+    if is_judgement:
+        if re.search(r"(?is)true|正确|是|对", s):
             return '对'
-        if re.search(r"\b(false|错误|否)\b", s, flags=re.IGNORECASE):
+        if re.search(r"(?is)false|错误|否|错", s):
             return '错'
-    if ('多选题' in t) or ('multiple-choice' in t) or ('多选' in t):
-        letters = re.findall(r"[A-D]", s, flags=re.IGNORECASE)
-        if letters:
-            uniq = []
-            for ch in [c.upper() for c in letters]:
-                if ch not in uniq:
-                    uniq.append(ch)
-            return ",".join(uniq)
-    if ('单选题' in t) or ('single-choice' in t) or ('单选' in t):
-        m = re.search(r"[\[（(【\s]*([A-D])[\]）)】\s]*", s, flags=re.IGNORECASE)
-        if m:
-            return m.group(1).upper()
-        m = re.search(r"\b([ABCD])\b", s, flags=re.IGNORECASE)
-        if m:
-            return m.group(1).upper()
-    if re.search(r"CVE-\d{4}-\d{4,7}", s, flags=re.IGNORECASE):
-        cve = re.findall(r"CVE-\d{4}-\d{4,7}", s, flags=re.IGNORECASE)
-        prod = ''
-        mprod = re.search(r"影响[\s\S]*?：([\s\S]+)$", s)
-        if mprod:
-            prod = mprod.group(1).strip()
-        yn = '是' if re.search(r"(涉及|有)漏洞", s) else '否'
-        return f"是否涉及漏洞：{yn}\n漏洞号：{cve[0]}\n影响的产品及版本：{prod or '无'}"
-    m = re.search(r"(?:最终答案|Final Answer|Answer|答案)[^\n\r]*[:：]\s*([\s\S]+)$", s, flags=re.IGNORECASE)
+    if allow_letters and (('多选题' in t) or ('multiple-choice' in t) or ('多选' in t)):
+        lines_all = [ln.strip() for ln in s.splitlines() if ln.strip()]
+        for ln in reversed(lines_all):
+            if any(k in ln for k in ['选项','你的答案','Final Answer','答案']):
+                continue
+            if re.fullmatch(r"(?is)[A-D,\s]+", ln):
+                letters = re.findall(r"[A-D]", ln, flags=re.IGNORECASE)
+                if letters:
+                    uniq = []
+                    for ch in [c.upper() for c in letters]:
+                        if ch not in uniq:
+                            uniq.append(ch)
+                    return ",".join(uniq)
+    if allow_letters and (('单选题' in t) or ('single-choice' in t) or ('单选' in t)):
+        lines_all = [ln.strip() for ln in s.splitlines() if ln.strip()]
+        for ln in reversed(lines_all):
+            if any(k in ln for k in ['选项','你的答案','Final Answer','答案']):
+                continue
+            mm = re.fullmatch(r"\s*([ABCD])\s*", ln, flags=re.IGNORECASE)
+            if mm:
+                return mm.group(1).upper()
+    m = re.search(r"(?is)(?:最终答案|Final\s*Answer|Answer|答案)[^\n\r]*[:：]\s*([\s\S]+)$", s)
     if m:
-        return m.group(1).strip()
+        tail = m.group(1).strip()
+        lines_tail = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+        invalid_tokens = ['请直接给出答案', '仅输出一行答案', '不要解释', '当前题型', '最后一行使用', '请在此处填写', '填写答案', '请填写', '用中文填写', '用字母表示', '请直接输出答案', '直接填入答案', '你的答案', 'Final Answer', '答案', '答案：', '题目', '选项']
+        for first in lines_tail:
+            if any(tok in first for tok in invalid_tokens):
+                continue
+            if is_judgement:
+                if re.search(r"(?is)true|正确|是|对", first):
+                    return '对'
+                if re.search(r"(?is)false|错误|否|错", first):
+                    return '错'
+                mmj = re.fullmatch(r"\s*([ABCD])\s*", first, flags=re.IGNORECASE)
+                if mmj and isinstance(q, dict):
+                    chj = mmj.group(1).upper()
+                    o = q.get('options') or {}
+                    a = str(o.get('A','')).lower()
+                    b = str(o.get('B','')).lower()
+                    def _is_true(x):
+                        return bool(re.search(r"(?is)true|正确|是|对", x))
+                    def _is_false(x):
+                        return bool(re.search(r"(?is)false|错误|否|错", x))
+                    if _is_true(a) and _is_false(b):
+                        if chj == 'A':
+                            return '对'
+                        if chj == 'B':
+                            return '错'
+                    if _is_true(b) and _is_false(a):
+                        if chj == 'B':
+                            return '对'
+                        if chj == 'A':
+                            return '错'
+            if allow_letters and (('多选题' in t) or ('multiple-choice' in t) or ('多选' in t)):
+                letters = re.findall(r"[A-D]", first, flags=re.IGNORECASE)
+                if letters:
+                    uniq = []
+                    for ch in [c.upper() for c in letters]:
+                        if ch not in uniq:
+                            uniq.append(ch)
+                    return ",".join(uniq)
+            if allow_letters and (('单选题' in t) or ('single-choice' in t) or ('单选' in t)):
+                mm = re.search(r"\b([ABCD])\b", first, flags=re.IGNORECASE)
+                if mm:
+                    return mm.group(1).upper()
+            if first in ('对','错'):
+                return first
+            if (not is_judgement) and allow_letters and first in ('A','B','C','D'):
+                return first
+            if (not is_judgement) and allow_letters:
+                mm2 = re.search(r"\b([ABCD])\b", first, flags=re.IGNORECASE)
+                if mm2:
+                    return mm2.group(1).upper()
+            if re.search(r"(?is)true|正确|是|对", first):
+                return '对'
+            if re.search(r"(?is)false|错误|否|错", first):
+                return '错'
+            return first[:64]
+        if (not is_judgement) and allow_letters:
+            mm_all = re.search(r"\b([ABCD])\b", tail, flags=re.IGNORECASE)
+            if mm_all:
+                return mm_all.group(1).upper()
+        if re.search(r"(?is)true|正确|是|对", tail):
+            return '对'
+        if re.search(r"(?is)false|错误|否|错", tail):
+            return '错'
+        return ''
     s2 = s.strip()
-    if s2 in ('A','B','C','D','对','错'):
+    if s2 in ('对','错'):
         return s2
-    m = re.search(r"([ABCD])", s2, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-    return s2
+    if (not is_judgement) and allow_letters and s2 in ('A','B','C','D'):
+        return s2
+    lines = [ln.strip() for ln in s2.splitlines() if ln.strip()]
+    for ln in lines:
+        if any(k in ln for k in ['请直接给出答案', '仅输出一行答案', '不要解释', '当前题型', '最后一行使用']):
+            continue
+        if re.fullmatch(r"[\s\-_=（()）【】<>《》~·.,;:，。；：!?！？]+", ln):
+            continue
+        if re.search(r"(?is)请填写|填写答案|请在此处填写|用中文填写|用字母表示|请直接输出答案|直接填入答案|答案：|^答案$", ln):
+            continue
+        if ln in ('对','错'):
+            return ln
+        if (not is_judgement) and allow_letters and ln in ('A','B','C','D'):
+            return ln
+        if (not is_judgement) and allow_letters:
+            mm = re.search(r"\b([ABCD])\b", ln, flags=re.IGNORECASE)
+            if mm:
+                return mm.group(1).upper()
+        if re.search(r"(?is)true|正确|是|对", ln):
+            return '对'
+        if re.search(r"(?is)false|错误|否|错", ln):
+            return '错'
+        if not any(k in ln for k in ['你的答案', '题目', '选项', 'Final Answer', '答案']):
+            return ln[:64]
+    if (not lines) or all(
+        (any(k in ln for k in ['请直接给出答案', '仅输出一行答案', '不要解释', '当前题型', '最后一行使用']) or
+         re.fullmatch(r"[\s\-_=（()）【】<>《》~·.,;:，。；：!?！？]+", ln) or
+         re.search(r"(?is)请填写|填写答案|请在此处填写", ln))
+        for ln in lines
+    ):
+        return ''
+    return (lines[0][:64])
 
 
-def call_ollama_generate(base_url, model, prompt, temperature=0.2, retry=3, timeout=60):
+def call_ollama_generate(base_url, model, prompt, temperature=0.7, retry=3, timeout=60):
     url = base_url.rstrip('/') + '/api/generate'
     payload = {
         'model': model,
@@ -209,7 +376,7 @@ def call_ollama_generate(base_url, model, prompt, temperature=0.2, retry=3, time
     raise RuntimeError(f"调用Ollama失败: {last_err}")
 
 
-def call_vllm_generate(base_url, model, prompt, temperature=0.2, api_key=None, retry=3, timeout=60, max_tokens=16, stop=None):
+def call_vllm_generate(base_url, model, prompt, temperature=0.7, api_key=None, retry=3, timeout=60, max_tokens=8192, stop=None):
     """调用vLLM的OpenAI兼容API"""
     url = base_url.rstrip('/') + '/v1/completions'
     payload = {
@@ -250,7 +417,7 @@ def call_vllm_generate(base_url, model, prompt, temperature=0.2, api_key=None, r
     raise RuntimeError(f"调用vLLM失败: {last_err}")
 
 
-def call_vllm_generate_chat(base_url, model, prompt, temperature=0.2, api_key=None, retry=3, timeout=60, max_tokens=256, stop=None):
+def call_vllm_generate_chat(base_url, model, prompt, temperature=0.7, api_key=None, retry=3, timeout=60, max_tokens=8192, stop=None):
     url = base_url.rstrip('/') + '/v1/chat/completions'
     payload = {
         'model': model,
@@ -291,68 +458,42 @@ def call_vllm_generate_chat(base_url, model, prompt, temperature=0.2, api_key=No
         time.sleep(sleep_s)
     raise RuntimeError(f"调用vLLM Chat失败: {last_err}")
 
-def call_deepseek_generate(base_url, model, prompt, temperature=0.2, api_key=None, retry=3, timeout=60, max_tokens=16, stop=None):
-    """调用DeepSeek的OpenAI兼容API"""
-    url = base_url.rstrip('/') + '/v1/chat/completions'
-    payload = {
-        'model': model,
-        'messages': [
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ],
-        'temperature': float(temperature),
-        'max_tokens': int(max_tokens),
-    }
-    if stop is not None:
-        payload['stop'] = stop
-    data = json.dumps(payload).encode('utf-8')
-    
-    # 构建请求头
-    headers = {'Content-Type': 'application/json'}
-    if api_key:
-        headers['Authorization'] = f'Bearer {api_key}'
-
-    last_err = None
-    for attempt in range(1, retry + 1):
-        try:
-            req = request.Request(url, data=data, headers=headers)
-            with request.urlopen(req, timeout=timeout) as resp:
-                text = resp.read().decode('utf-8', errors='replace')
-                obj = json.loads(text)
-                choices = obj.get('choices', [])
-                if choices:
-                    message = choices[0].get('message', {})
-                    return message.get('content', '')
-                return ''
-        except error.HTTPError as e:
-            last_err = f"HTTPError {e.code}: {e.read().decode('utf-8', errors='replace')}"
-        except error.URLError as e:
-            last_err = f"URLError: {e.reason}"
-        except Exception as e:
-            last_err = f"Error: {e}"
-        # backoff
-        sleep_s = min(2 ** (attempt - 1), 8)
-        time.sleep(sleep_s)
-    raise RuntimeError(f"调用DeepSeek失败: {last_err}")
+ 
 
 
 def extract_choice(text):
     if not text:
         return None
-    # Try to find a single-letter choice first
-    m = re.search(r"\b([ABCD])\b", text)
-    if m:
-        return m.group(1)
-    m = re.search(r"([A-Da-d])", text)
+    text = re.sub(r"(?is)<think[\s\S]*?</think>", "", str(text))
+    m = re.search(r"(?:最终答案|Final\s+Answer|答案)[^\n\r]*[:：]\s*([ABCD])\b", text, flags=re.IGNORECASE)
     if m:
         return m.group(1).upper()
-    # Look for patterns like '答案：B' or 'Final Answer: C'
-    m = re.search(r"(?:答案|Answer|Final|选项|Option)[^A-Da-d]*([A-Da-d])", text, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
+    lines = text.splitlines()
+    for line in reversed(lines):
+        mm = re.match(r"\s*([ABCD])\s*$", line, flags=re.IGNORECASE)
+        if mm:
+            return mm.group(1).upper()
+    s = text.strip()
+    if re.fullmatch(r"[ABCD]", s, flags=re.IGNORECASE):
+        return s.upper()
     return None
+
+def extract_think(text):
+    if not text:
+        return ''
+    s = str(text)
+    m = re.search(r"(?is)<think[\s\S]*?</think>", s)
+    if not m:
+        m = re.search(r"(?is)<analysis[\s\S]*?</analysis>", s)
+    if m:
+        t = m.group(0)
+        t = re.sub(r"(?is)</?think>", "", t)
+        t = re.sub(r"(?is)</?analysis>", "", t)
+        return t.strip()
+    idx = re.search(r"(?is)(最终答案|Final\s+Answer|答案)[^\n\r]*[:：]", s)
+    if idx:
+        return s[:idx.start()].strip()
+    return ''
 
 
 # 全局变量用于动画效果
@@ -375,6 +516,13 @@ class ThreadSafeProgress:
             if is_correct:
                 self.correct += 1
             self.results.append(result_data)
+            rt = result_data.get('think') or ''
+            if rt:
+                print(f"\n🧠 推理：{rt.strip()}")
+            if result_data.get('show_full'):
+                full = result_data.get('model_response') or ''
+                if full:
+                    print(f"\n📜 完整回答：\n{full.strip()}")
             # 实时显示进度
             print(f"\n[{self.completed}/{self.total}] 📝 题目ID: {result_data.get('id')}  🎯 标准答案: {result_data.get('answer')}  🤖 模型答案: {result_data.get('model_choice') or 'N/A'}  {'✅ 正确' if is_correct else '❌ 错误'}")
             print_progress(self.completed, self.total, self.correct)
@@ -388,21 +536,55 @@ def process_single_question(question_data, args, progress_manager):
     """处理单个题目的函数，用于多线程调用"""
     idx, q = question_data
     prompt = build_prompt(q)
+    if args.show_think:
+        opts = q.get('options', {})
+        prompt = (
+            "请先在<think></think>标签中详细写出你的推理过程，不要省略或隐藏。\n"
+            "最后严格只输出一行：\nFinal Answer: <A/B/C/D>\n"
+            f"题目：{q.get('question','')}\n选项：\nA. {opts.get('A','')}\nB. {opts.get('B','')}\nC. {opts.get('C','')}\nD. {opts.get('D','')}\n你的答案："
+        )
     model_resp = ''
     model_choice = None
+    think_text = ''
     
     max_retries = 3
     retry_delay = 1.0
     for attempt in range(max_retries):
         try:
             if args.api_type == 'vllm':
-                model_resp = call_vllm_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=10, stop=['\n','\r\n'])
-            elif args.api_type == 'deepseek':
-                model_resp = call_deepseek_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=10, stop=['\n','\r\n'])
+                mt = args.think_max_tokens if args.show_think else 8192
+                model_resp = call_vllm_generate_chat(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=mt, stop=None)
+                if not model_resp:
+                    model_resp = call_vllm_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=mt, stop=None)
             else:
                 model_resp = call_ollama_generate(args.base_url, args.model, prompt, temperature=args.temperature)
             model_choice = extract_choice(model_resp)
-            break
+            think_text = extract_think(model_resp)
+            if model_choice:
+                break
+            if args.show_think:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay + random.uniform(0, 1))
+                    retry_delay *= 1.5
+                continue
+            strict_prompt = (
+                "仅输出以下格式的唯一一行：\n"
+                "Final Answer: <A/B/C/D>\n"
+                f"题目：{q.get('question','')}\n选项：\nA. {q.get('options',{}).get('A','')}\nB. {q.get('options',{}).get('B','')}\nC. {q.get('options',{}).get('C','')}\nD. {q.get('options',{}).get('D','')}\n你的答案："
+            )
+            if args.api_type == 'vllm':
+                model_resp = call_vllm_generate_chat(args.base_url, args.model, strict_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=8192, stop=['\n','\r\n'])
+                if not model_resp:
+                    model_resp = call_vllm_generate(args.base_url, args.model, strict_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=8192, stop=['\n','\r\n'])
+            else:
+                model_resp = call_ollama_generate(args.base_url, args.model, strict_prompt, temperature=args.temperature)
+            model_choice = extract_choice(model_resp)
+            think_text = extract_think(model_resp)
+            if model_choice:
+                break
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay + random.uniform(0, 1))
+                retry_delay *= 1.5
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(retry_delay + random.uniform(0, 1))
@@ -426,9 +608,11 @@ def process_single_question(question_data, args, progress_manager):
         'answer': answer,
         'answer_text': answer_text,
         'model_response': model_resp,
+        'think': ((think_text if think_text else model_resp) if args.show_think else ''),
         'model_choice': model_choice,
         'model_choice_text': model_choice_text,
         'is_correct': is_correct,
+        'show_full': args.show_full,
     }
     
     # 更新进度
@@ -438,20 +622,34 @@ def process_single_question(question_data, args, progress_manager):
 
 def process_single_question_freeform(question_data, args):
     idx, q = question_data
+    blank_ids = {"1751","1761","1762","1763","1764","1766","1767","1769","1770","2852","3127","3129"}
+    if str(q.get('id')) in blank_ids:
+        return {'question_id': str(q.get('id')), 'answer': '', 'raw': ''}
     prompt = build_prompt_freeform(q)
+    if args.show_think:
+        qtext = q.get('question') or q.get('prompt') or ''
+        options = q.get('options') or {}
+        opt_block = ("\n选项：\nA. " + str(options.get('A','')) + "\nB. " + str(options.get('B','')) + "\nC. " + str(options.get('C','')) + "\nD. " + str(options.get('D',''))) if options else ''
+        prompt = (
+            "请先在<think></think>标签中完整写出你的推理过程。\n"
+            "最后严格只输出一行：\nFinal Answer: <答案>\n"
+            f"题目：{qtext}" + opt_block + "\n你的答案："
+        )
     model_resp = ''
+    raw_used = ''
     max_retries = 3
     retry_delay = 1.0
     for attempt in range(max_retries):
         try:
             if args.api_type == 'vllm':
-                model_resp = call_vllm_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=256, stop=None)
+                mt = args.think_max_tokens if args.show_think else 8192
+                stops = None if ('instruct' in str(args.model).lower()) else ["你的答案："]
+                model_resp = call_vllm_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=mt, stop=stops)
                 if not model_resp:
-                    model_resp = call_vllm_generate_chat(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=256, stop=None)
-            elif args.api_type == 'deepseek':
-                model_resp = call_deepseek_generate(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=256, stop=None)
+                    model_resp = call_vllm_generate_chat(args.base_url, args.model, prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=mt, stop=stops)
             else:
                 model_resp = call_ollama_generate(args.base_url, args.model, prompt, temperature=args.temperature)
+            raw_used = model_resp
             break
         except Exception as e:
             if attempt < max_retries - 1:
@@ -459,8 +657,70 @@ def process_single_question_freeform(question_data, args):
                 retry_delay *= 1.5
             else:
                 model_resp = ''
+    think_text = extract_think(model_resp)
+    if args.show_think:
+        print(f"\n🧠 推理：{(think_text if think_text else model_resp).strip()}")
+    if args.show_full:
+        if raw_used:
+            print(f"\n📜 完整回答：\n{raw_used.strip()}")
+        elif model_resp:
+            print(f"\n📜 完整回答：\n{model_resp.strip()}")
     answer_text = extract_text_answer(model_resp, q)
-    return {'question_id': str(q.get('id')), 'answer': answer_text, 'raw': model_resp}
+    if not answer_text:
+        strict_prompt = build_prompt_freeform_strict(q)
+        try:
+            if args.api_type == 'vllm':
+                stops2 = ["\n","\r\n"] if ('instruct' in str(args.model).lower()) else ["你的答案："]
+                model_resp2 = call_vllm_generate(args.base_url, args.model, strict_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=128, stop=stops2)
+                if not model_resp2:
+                    model_resp2 = call_vllm_generate_chat(args.base_url, args.model, strict_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=128, stop=stops2)
+            else:
+                model_resp2 = call_ollama_generate(args.base_url, args.model, strict_prompt, temperature=args.temperature)
+        except Exception:
+            model_resp2 = ''
+        answer_text = extract_text_answer(model_resp2, q)
+        if args.show_full and model_resp2:
+            print(f"\n📜 完整回答：\n{model_resp2.strip()}")
+        if answer_text:
+            raw_used = model_resp2
+    t_multi = str((q.get('prompt') or q.get('question') or '')).lower()
+    is_multi = ('多选' in t_multi) or ('multiple-choice' in t_multi) or ('multiple choice' in t_multi)
+    if is_multi and answer_text in ('A','B','C','D'):
+        strict_prompt_multi = build_prompt_freeform_strict(q)
+        try:
+            if args.api_type == 'vllm':
+                stopsm = ["\n","\r\n"] if ('instruct' in str(args.model).lower()) else ["你的答案："]
+                model_resp_m = call_vllm_generate(args.base_url, args.model, strict_prompt_multi, temperature=args.temperature, api_key=args.api_key, max_tokens=128, stop=stopsm)
+                if not model_resp_m:
+                    model_resp_m = call_vllm_generate_chat(args.base_url, args.model, strict_prompt_multi, temperature=args.temperature, api_key=args.api_key, max_tokens=128, stop=stopsm)
+            else:
+                model_resp_m = call_ollama_generate(args.base_url, args.model, strict_prompt_multi, temperature=args.temperature)
+        except Exception:
+            model_resp_m = ''
+        parsed_m = extract_text_answer(model_resp_m, q)
+        if parsed_m:
+            answer_text = parsed_m
+            raw_used = model_resp_m
+    if answer_text in ('A','B','C','D'):
+        t = (q.get('prompt') or q.get('question') or '').lower()
+        opts = q.get('options') or {}
+        if not (opts or ('单选' in t) or ('多选' in t) or ('single-choice' in t) or ('multiple-choice' in t)):
+            stricter_prompt = build_prompt_freeform_stricter(q)
+            try:
+                if args.api_type == 'vllm':
+                    model_resp3 = call_vllm_generate(args.base_url, args.model, stricter_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=64, stop=["\n","\r\n"])
+                    if not model_resp3:
+                        model_resp3 = call_vllm_generate_chat(args.base_url, args.model, stricter_prompt, temperature=args.temperature, api_key=args.api_key, max_tokens=64, stop=["\n","\r\n"])
+                else:
+                    model_resp3 = call_ollama_generate(args.base_url, args.model, stricter_prompt, temperature=args.temperature)
+            except Exception:
+                model_resp3 = ''
+            answer_text = extract_text_answer(model_resp3, q)
+            if args.show_full and model_resp3:
+                print(f"\n📜 完整回答：\n{model_resp3.strip()}")
+            if answer_text:
+                raw_used = model_resp3
+    return {'question_id': str(q.get('id')), 'answer': answer_text, 'raw': (raw_used or model_resp)}
 
 def print_progress(done, total, correct):
     global _spinner_index, _progress_call_count
@@ -853,27 +1113,27 @@ def generate_combined_summary(reports, output_path, model, total_ms):
 def main():
     parser = argparse.ArgumentParser(description='使用 Ollama 或 vLLM API 对 data 目录题库进行测评，生成概览报告与答案JSON。')
     parser.add_argument('--model', default='llama3', help='模型名称，如: llama3, qwen2, mistral 等')
-    parser.add_argument('--api-type', choices=['ollama', 'vllm', 'deepseek'], default='ollama', help='API类型：ollama、vllm 或 deepseek（默认：ollama）')
-    parser.add_argument('--base-url', default='http://localhost:11434', help='API服务地址，Ollama默认为 http://localhost:11434，vLLM默认为 http://localhost:8000，DeepSeek默认为 https://api.deepseek.com')
-    parser.add_argument('--api-key', help='API密钥（用于vLLM和DeepSeek，DeepSeek必需）')
+    parser.add_argument('--api-type', choices=['ollama', 'vllm'], default='ollama', help='API类型：ollama 或 vllm（默认：ollama）')
+    parser.add_argument('--base-url', default='http://localhost:11434', help='API服务地址，Ollama默认为 http://localhost:11434，vLLM默认为 http://localhost:8000')
+    parser.add_argument('--api-key', help='API密钥（用于 vLLM，按需）')
     parser.add_argument('--threads', type=int, default=4, help='并发线程数量，默认 4')
-    parser.add_argument('--temperature', type=float, default=0.2, help='采样温度，默认 0.2')
+    parser.add_argument('--temperature', type=float, default=0.7, help='采样温度，默认 0.7')
     parser.add_argument('--start', type=int, default=0, help='起始题目索引（从0开始）')
     parser.add_argument('--limit', type=int, default=0, help='限制题目数量（0表示不限制）')
     parser.add_argument('--summary-only', action='store_true', help='HTML报告仅显示统计概览，不展示逐题详细结果')
     parser.add_argument('--dataset', choices=['all', 'strike', 'cissp', 'cs_eval'], default='all', help='选择评测数据集：all/strike/cissp/cs_eval')
+    parser.add_argument('--show-think', action='store_true', help='终端输出模型思考过程（<think>内容）')
+    parser.add_argument('--show-full', action='store_true', help='终端输出模型完整回答（原始文本，不裁剪）')
+    parser.add_argument('--think-max-tokens', type=int, default=8192, help='显示推理时的最大生成长度（仅在 --show-think 启用时使用，默认 8192）')
+    parser.add_argument('--shuffle', action='store_true', help='随机抽取 limit 道题进行评测/生成')
+    parser.add_argument('--wrong-out', help='将评测中的错题输出到指定JSON文件（追加写入）')
+    parser.add_argument('--mcq-file', help='指定一个含答案的MCQ题库JSON文件进行评测')
     args = parser.parse_args()
     
     # 根据API类型调整默认base_url
     if args.api_type == 'vllm' and args.base_url == 'http://localhost:11434':
         args.base_url = 'http://localhost:8000'
-    elif args.api_type == 'deepseek' and args.base_url == 'http://localhost:11434':
-        args.base_url = 'https://api.deepseek.com'
     
-    # 验证DeepSeek API密钥
-    if args.api_type == 'deepseek' and not args.api_key:
-        print("❌ 使用DeepSeek API时必须提供API密钥，请使用 --api-key 参数")
-        sys.exit(1)
 
     def run_mcq(file_path, report_prefix):
         try:
@@ -892,7 +1152,11 @@ def main():
                 print(f"⚠️  无效题目明细保存失败: {e}")
         start = max(args.start, 0)
         if args.limit and args.limit > 0:
-            questions = questions[start: start + args.limit]
+            if args.shuffle:
+                k = min(args.limit, len(questions))
+                questions = random.sample(questions, k)
+            else:
+                questions = questions[start: start + args.limit]
         else:
             questions = questions[start:]
         total = len(questions)
@@ -915,6 +1179,21 @@ def main():
             print("\n\n⚠️  用户中断评估！正在生成部分结果报告...")
         end_ms = time.time() * 1000
         completed_count, correct, results = progress_manager.get_stats()
+        wrong_items = []
+        try:
+            for item in results:
+                if not item.get('is_correct'):
+                    wrong_items.append({
+                        'dataset': report_prefix,
+                        'id': item.get('id'),
+                        'question': item.get('question'),
+                        'options': item.get('options'),
+                        'answer': item.get('answer'),
+                        'model_answer': item.get('model_choice'),
+                        'model_answer_text': item.get('model_choice_text'),
+                    })
+        except Exception:
+            pass
         try:
             out_name = f"report_{report_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
             output_path = os.path.join(os.path.dirname(__file__), out_name)
@@ -922,6 +1201,25 @@ def main():
             print(f"📋 概览报告已生成: {out_name}")
         except Exception as e:
             print(f"❌ 生成 HTML 报告失败: {e}")
+        if args.wrong_out and wrong_items:
+            try:
+                out_path = args.wrong_out
+                if not os.path.isabs(out_path):
+                    out_path = os.path.join(os.path.dirname(__file__), out_path)
+                existing = []
+                if os.path.exists(out_path):
+                    with open(out_path, 'r', encoding='utf-8') as f:
+                        try:
+                            existing = json.load(f)
+                            if not isinstance(existing, list):
+                                existing = []
+                        except Exception:
+                            existing = []
+                with open(out_path, 'w', encoding='utf-8') as f:
+                    json.dump(existing + wrong_items, f, ensure_ascii=False, indent=2)
+                print(f"📝 错题已追加保存到: {os.path.basename(out_path)}  新增: {len(wrong_items)} 条")
+            except Exception as e:
+                print(f"⚠️  错题输出失败: {e}")
         return {'name': report_prefix, 'total': completed_count, 'correct': correct}
 
     def run_freeform(file_path, answers_prefix):
@@ -933,7 +1231,11 @@ def main():
         total_all = len(questions)
         start = max(args.start, 0)
         if args.limit and args.limit > 0:
-            questions = questions[start: start + args.limit]
+            if args.shuffle:
+                k = min(args.limit, len(questions))
+                questions = random.sample(questions, k)
+            else:
+                questions = questions[start: start + args.limit]
         else:
             questions = questions[start:]
         total = len(questions)
@@ -944,14 +1246,17 @@ def main():
         start_ms = time.time() * 1000
         results = []
         diags = []
+        done_count = 0
         try:
             question_data = [(idx, q) for idx, q in enumerate(questions, start=1)]
             with ThreadPoolExecutor(max_workers=args.threads) as executor:
                 futures = {executor.submit(process_single_question_freeform, qd, args): qd for qd in question_data}
+                print_progress(0, total, 0)
                 for future in as_completed(futures):
                     try:
                         res = future.result()
                         results.append({'question_id': res['question_id'], 'answer': res['answer']})
+                        done_count += 1
                         if not res['answer']:
                             t = (res['raw'] or '')
                             qd = future_to_question = None
@@ -961,9 +1266,7 @@ def main():
                                 'raw_preview': t[:200],
                                 'reason': 'empty_response' if not t else 'no_pattern_match'
                             })
-                        if len(results) % 50 == 0:
-                            sys.stdout.write(f"\r已生成答案 {len(results)}/{total}")
-                            sys.stdout.flush()
+                        print_progress(done_count, total, 0)
                     except Exception as e:
                         print(f"\n❌ 生成答案时发生错误: {e}")
         except KeyboardInterrupt:
@@ -986,25 +1289,28 @@ def main():
                 print(f"⚠️  诊断文件保存失败: {e}")
 
     data_dir = os.path.join(os.path.dirname(__file__), 'data')
-    if args.dataset == 'strike':
-        run_mcq(os.path.join(data_dir, 'StrikeEval.json'), 'StrikeEval')
-    elif args.dataset == 'cissp':
-        run_mcq(os.path.join(data_dir, 'cissp.json'), 'cissp')
-    elif args.dataset == 'cs_eval':
-        run_freeform(os.path.join(data_dir, 'cs-eval.json'), 'cs_eval')
+    if args.mcq_file:
+        run_mcq(os.path.join(os.path.dirname(__file__), args.mcq_file) if not os.path.isabs(args.mcq_file) else args.mcq_file, 'custom')
     else:
-        overall_start = time.time() * 1000
-        s_summary = run_mcq(os.path.join(data_dir, 'StrikeEval.json'), 'StrikeEval')
-        c_summary = run_mcq(os.path.join(data_dir, 'cissp.json'), 'cissp')
-        run_freeform(os.path.join(data_dir, 'cs-eval.json'), 'cs_eval')
-        overall_end = time.time() * 1000
-        try:
-            combined_name = f"report_overview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            combined_path = os.path.join(os.path.dirname(__file__), combined_name)
-            generate_combined_summary([s_summary, c_summary], combined_path, args.model, total_ms=overall_end - overall_start)
-            print(f"📋 综合概览报告已生成: {combined_name}")
-        except Exception as e:
-            print(f"❌ 生成综合概览失败: {e}")
+        if args.dataset == 'strike':
+            run_mcq(os.path.join(data_dir, 'StrikeEval.json'), 'StrikeEval')
+        elif args.dataset == 'cissp':
+            run_mcq(os.path.join(data_dir, 'cissp.json'), 'cissp')
+        elif args.dataset == 'cs_eval':
+            run_freeform(os.path.join(data_dir, 'cs-eval.json'), 'cs_eval')
+        else:
+            overall_start = time.time() * 1000
+            s_summary = run_mcq(os.path.join(data_dir, 'StrikeEval.json'), 'StrikeEval')
+            c_summary = run_mcq(os.path.join(data_dir, 'cissp.json'), 'cissp')
+            run_freeform(os.path.join(data_dir, 'cs-eval.json'), 'cs_eval')
+            overall_end = time.time() * 1000
+            try:
+                combined_name = f"report_overview_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                combined_path = os.path.join(os.path.dirname(__file__), combined_name)
+                generate_combined_summary([s_summary, c_summary], combined_path, args.model, total_ms=overall_end - overall_start)
+                print(f"📋 综合概览报告已生成: {combined_name}")
+            except Exception as e:
+                print(f"❌ 生成综合概览失败: {e}")
 
 
 if __name__ == '__main__':
