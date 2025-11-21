@@ -1,6 +1,6 @@
 # AISec-StrikeEval 
 
-Chinese docs: [`README_zh.md`](README_zh.md)
+[`中文文档`](README_zh.md)
 
 ## Project Overview
 
