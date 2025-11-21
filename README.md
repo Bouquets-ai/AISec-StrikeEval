@@ -130,16 +130,6 @@ MIT License.
 - All datasets:
   - `python AISec-StrikeEval.py --api-type vllm --base-url <URL> --api-key <KEY> --model <MODEL> --threads 8 --dataset all`
 
-## 使用方法（cs-eval）
-
-要评测 CS-Eval 数据集，可直接运行：
-
-```bash
-python AISec-StrikeEval.py --api-type vllm --base-url http://10.4.3.190:8001 --model Qwen3-Next-80B-A3B-Instruct-FP8 --threads 50 --dataset cs_eval
-```
-
-运行结束后将在当前目录生成答案文件：`answers_cs_eval_YYYYMMDD_HHMMSS.json`。
-
 ## Architecture & Flow
 
 - Entry: CLI parses args and dispatches to evaluation or answer generation.
