@@ -2,6 +2,8 @@
 
 [`中文文档`](README_zh.md)
 
+
+![eval.png](eval.png)
 ## Project Overview
 
  AISec-StrikeEval evaluates LLMs on cybersecurity and pentest question sets. It supports Ollama and vLLM APIs, shows real-time progress and accuracy, generates HTML summary reports, and outputs model answers JSON for datasets without ground-truth answers.
